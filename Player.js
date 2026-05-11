@@ -6,24 +6,52 @@ import * as THREE from 'three';
 export class Player {
     constructor() {
         const geometry = new THREE.ConeGeometry(0.2, 0.5, 8);
-        const material = new THREE.MeshStandardMaterial({
+        this.material = new THREE.MeshStandardMaterial({
             color: 0x00ffff,
             emissive: 0x00ffff,
             emissiveIntensity: 2
         });
         
-        this.mesh = new THREE.Mesh(geometry, material);
+        this.mesh = new THREE.Mesh(geometry, this.material);
         // Align the cone to point along the Z axis (forward)
         this.mesh.rotation.x = Math.PI / 2;
+
+        // Trail system
+        this.trailParticles = [];
+        this.trailGroup = new THREE.Group();
+
+        // Animation states
+        this.isFlashing = false;
+        this.flashTimer = 0;
+        this.isJittering = false;
+        this.jitterTimer = 0;
+        this.originalColor = new THREE.Color(0x00ffff);
+    }
+
+    /**
+     * Triggers a hit animation by flashing the player mesh.
+     */
+    flash() {
+        this.isFlashing = true;
+        this.flashTimer = 10; // frames
+    }
+
+    /**
+     * Triggers a jitter animation to simulate impact.
+     */
+    jitter() {
+        this.isJittering = true;
+        this.jitterTimer = 10; // frames
     }
 
     /**
      * Updates the player position based on input and constrains it within the tunnel.
-     * @param {number} speed - The current game speed (unused here but matches signature)
+     * @param {number} speed - The current game speed
      * @param {InputHandler} inputHandler - The input system to check key presses
      */
     update(speed, inputHandler) {
         const moveSpeed = 0.15;
+        const previousPos = this.mesh.position.clone();
         
         // Horizontal movement
         if (inputHandler.isPressed('a') || inputHandler.isPressed('ArrowLeft')) {
@@ -49,6 +77,66 @@ export class Player {
             const angle = Math.atan2(this.mesh.position.y, this.mesh.position.x);
             this.mesh.position.x = Math.cos(angle) * radiusConstraint;
             this.mesh.position.y = Math.sin(angle) * radiusConstraint;
+        }
+
+        // Engine Glow Pulse
+        const glowPulse = 1.5 + Math.sin(Date.now() * 0.01 * speed) * 0.5;
+        this.material.emissiveIntensity = glowPulse;
+
+        // Hit Animations (Flash/Jitter)
+        if (this.isFlashing) {
+            if (this.flashTimer > 0) {
+                this.material.emissive.setHex(this.flashTimer % 2 === 0 ? 0xffffff : 0x00ffff);
+                this.flashTimer--;
+            } else {
+                this.material.emissive.copy(this.originalColor);
+                this.isFlashing = false;
+            }
+        }
+
+        if (this.isJittering) {
+            if (this.jitterTimer > 0) {
+                this.mesh.position.x += (Math.random() - 0.5) * 0.2;
+                this.mesh.position.y += (Math.random() - 0.5) * 0.2;
+                this.jitterTimer--;
+            } else {
+                this.isJittering = false;
+            }
+        }
+
+        // Trail Update
+        this._updateTrail();
+    }
+
+    _updateTrail() {
+        // Add new particle
+        const particleGeom = new THREE.SphereGeometry(0.05, 4, 4);
+        const particleMat = new THREE.MeshBasicMaterial({
+            color: 0x00ffff,
+            transparent: true,
+            opacity: 0.8
+        });
+        const particle = new THREE.Mesh(particleGeom, particleMat);
+        particle.position.copy(this.mesh.position);
+        particle.position.z -= 0.5; // Offset to back of ship
+        
+        this.trailParticles.push({
+            mesh: particle,
+            life: 1.0
+        });
+        this.trailGroup.add(particle);
+
+        // Update existing particles
+        for (let i = this.trailParticles.length - 1; i >= 0; i--) {
+            const p = this.trailParticles[i];
+            p.life -= 0.05;
+            p.mesh.scale.set(p.life, p.life, p.life);
+            p.mesh.material.opacity = p.life;
+            
+            if (p.life <= 0) {
+                this.trailGroup.remove(p.mesh);
+                this.trailParticles.splice(i, 1);
+            }
         }
     }
 }
