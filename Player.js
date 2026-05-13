@@ -26,6 +26,12 @@ export class Player {
         this.isJittering = false;
         this.jitterTimer = 0;
         this.originalColor = new THREE.Color(0x00ffff);
+
+        // Dash state
+        this.isDashing = false;
+        this.dashTimer = 0;
+        this.dashCooldown = 0;
+        this.dashDirection = new THREE.Vector2();
     }
 
     /**
@@ -45,28 +51,54 @@ export class Player {
     }
 
     /**
+     * Initiates a dash in the specified direction.
+     * @param {THREE.Vector2} direction - The direction to dash in
+     */
+    dash(direction) {
+        if (this.dashCooldown <= 0) {
+            this.isDashing = true;
+            this.dashTimer = 8; // frames
+            this.dashCooldown = 40; // frames
+            this.dashDirection.copy(direction).normalize();
+        }
+    }
+
+    /**
      * Updates the player position based on input and constrains it within the tunnel.
      * @param {number} speed - The current game speed
      * @param {InputHandler} inputHandler - The input system to check key presses
      */
     update(speed, inputHandler) {
-        const moveSpeed = 0.15;
-        const previousPos = this.mesh.position.clone();
+        if (this.dashCooldown > 0) this.dashCooldown--;
+
+        let currentMoveSpeed = 0.15;
         
-        // Horizontal movement
-        if (inputHandler.isPressed('a') || inputHandler.isPressed('ArrowLeft')) {
-            this.mesh.position.x -= moveSpeed;
-        }
-        if (inputHandler.isPressed('d') || inputHandler.isPressed('ArrowRight')) {
-            this.mesh.position.x += moveSpeed;
-        }
-        
-        // Vertical movement
-        if (inputHandler.isPressed('w') || inputHandler.isPressed('ArrowUp')) {
-            this.mesh.position.y += moveSpeed;
-        }
-        if (inputHandler.isPressed('s') || inputHandler.isPressed('ArrowDown')) {
-            this.mesh.position.y -= moveSpeed;
+        if (this.isDashing) {
+            currentMoveSpeed = 0.8;
+            this.mesh.position.x += this.dashDirection.x * currentMoveSpeed;
+            this.mesh.position.y += this.dashDirection.y * currentMoveSpeed;
+            this.dashTimer--;
+            
+            if (this.dashTimer <= 0) {
+                this.isDashing = false;
+                this.material.emissive.copy(this.originalColor);
+            }
+        } else {
+            // Horizontal movement
+            if (inputHandler.isPressed('a') || inputHandler.isPressed('ArrowLeft')) {
+                this.mesh.position.x -= currentMoveSpeed;
+            }
+            if (inputHandler.isPressed('d') || inputHandler.isPressed('ArrowRight')) {
+                this.mesh.position.x += currentMoveSpeed;
+            }
+            
+            // Vertical movement
+            if (inputHandler.isPressed('w') || inputHandler.isPressed('ArrowUp')) {
+                this.mesh.position.y += currentMoveSpeed;
+            }
+            if (inputHandler.isPressed('s') || inputHandler.isPressed('ArrowDown')) {
+                this.mesh.position.y -= currentMoveSpeed;
+            }
         }
 
         // Radial constraint
@@ -83,8 +115,10 @@ export class Player {
         const glowPulse = 1.5 + Math.sin(Date.now() * 0.01 * speed) * 0.5;
         this.material.emissiveIntensity = glowPulse;
 
-        // Hit Animations (Flash/Jitter)
-        if (this.isFlashing) {
+        // Hit Animations (Flash/Jitter/Dash)
+        if (this.isDashing) {
+            this.material.emissive.setHex(0xffffff);
+        } else if (this.isFlashing) {
             if (this.flashTimer > 0) {
                 this.material.emissive.setHex(this.flashTimer % 2 === 0 ? 0xffffff : 0x00ffff);
                 this.flashTimer--;
