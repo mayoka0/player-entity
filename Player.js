@@ -75,18 +75,24 @@ export class Player {
      * Updates the player position based on input and constrains it within the tunnel.
      * @param {number} speed - The current game speed
      * @param {InputHandler} inputHandler - The input system to check key presses
+     * @param {number} deltaTime - Time elapsed since last frame in seconds
      */
-    update(speed, inputHandler) {
-        if (this.dashCooldown > 0) this.dashCooldown--;
+    update(speed, inputHandler, deltaTime = 1/60) {
+        // Normalize deltaTime to 60fps base for existing logic
+        const dt = deltaTime * 60;
 
-        let currentMoveSpeed = 0.15;
+        if (this.dashCooldown > 0) {
+            this.dashCooldown -= dt;
+        }
+
+        let currentMoveSpeed = 0.15 * dt;
         const lastLogicPos = this.logicPosition.clone();
         
         if (this.isDashing) {
-            currentMoveSpeed = 0.8;
-            this.logicPosition.x += this.dashDirection.x * currentMoveSpeed;
-            this.logicPosition.y += this.dashDirection.y * currentMoveSpeed;
-            this.dashTimer--;
+            const dashMoveSpeed = 0.8 * dt;
+            this.logicPosition.x += this.dashDirection.x * dashMoveSpeed;
+            this.logicPosition.y += this.dashDirection.y * dashMoveSpeed;
+            this.dashTimer -= dt;
             
             if (this.dashTimer <= 0) {
                 this.isDashing = false;
@@ -119,8 +125,9 @@ export class Player {
         }
 
         // Physics: Elastic Inertia (Spring overshoot)
-        const stiffness = 0.25;
-        const damping = 0.75;
+        // Adjust stiffness/damping for dt
+        const stiffness = 0.25 * dt;
+        const damping = Math.pow(0.75, dt);
         
         const displacement = new THREE.Vector2().subVectors(this.logicPosition, this.mesh.position);
         const force = displacement.multiplyScalar(stiffness);
@@ -132,13 +139,13 @@ export class Player {
 
         // Physics: Banking & G-Force
         this.velocity.subVectors(this.logicPosition, lastLogicPos);
-        const acceleration = this.velocity.length() - this.lastVelocity.length();
+        const acceleration = (this.velocity.length() - this.lastVelocity.length()) / dt;
         this.gForce = Math.abs(acceleration) * 5.0 + (this.isDashing ? 1.5 : 0);
         this.lastVelocity.copy(this.velocity);
 
         // Banking (Roll) based on horizontal velocity
-        const targetBank = -this.velocity.x * 4.0;
-        this.bankAngle = THREE.MathUtils.lerp(this.bankAngle, targetBank, 0.15);
+        const targetBank = - (this.velocity.x / dt) * 4.0;
+        this.bankAngle = THREE.MathUtils.lerp(this.bankAngle, targetBank, 1 - Math.pow(1 - 0.15, dt));
         this.mesh.rotation.z = this.bankAngle;
 
         // Engine Glow Pulse
@@ -150,8 +157,8 @@ export class Player {
             this.material.emissive.setHex(0xffffff);
         } else if (this.isFlashing) {
             if (this.flashTimer > 0) {
-                this.material.emissive.setHex(this.flashTimer % 2 === 0 ? 0xffffff : 0x00ffff);
-                this.flashTimer--;
+                this.material.emissive.setHex(Math.floor(this.flashTimer) % 2 === 0 ? 0xffffff : 0x00ffff);
+                this.flashTimer -= dt;
             } else {
                 this.material.emissive.copy(this.originalColor);
                 this.isFlashing = false;
@@ -160,19 +167,19 @@ export class Player {
 
         if (this.isJittering) {
             if (this.jitterTimer > 0) {
-                this.mesh.position.x += (Math.random() - 0.5) * 0.2;
-                this.mesh.position.y += (Math.random() - 0.5) * 0.2;
-                this.jitterTimer--;
+                this.mesh.position.x += (Math.random() - 0.5) * 0.2 * dt;
+                this.mesh.position.y += (Math.random() - 0.5) * 0.2 * dt;
+                this.jitterTimer -= dt;
             } else {
                 this.isJittering = false;
             }
         }
 
         // Trail Update
-        this._updateTrail();
+        this._updateTrail(dt);
     }
 
-    _updateTrail() {
+    _updateTrail(dt = 1) {
         // Dynamic properties based on G-force (velocity changes)
         const trailScale = 1.0 + this.gForce * 2.0;
         const trailColor = new THREE.Color(0x00ffff);
@@ -180,7 +187,7 @@ export class Player {
             trailColor.lerp(new THREE.Color(0xff00ff), Math.min(this.gForce, 1.0));
         }
 
-        // Add new particle
+        // Add new particle - spawn rate could be decoupled, but we'll scale life/move
         const particleGeom = new THREE.SphereGeometry(0.05, 4, 4);
         const particleMat = new THREE.MeshBasicMaterial({
             color: trailColor,
@@ -201,10 +208,10 @@ export class Player {
         // Update existing particles
         for (let i = this.trailParticles.length - 1; i >= 0; i--) {
             const p = this.trailParticles[i];
-            p.life -= 0.05;
-            const currentScale = p.life * p.maxScale;
+            p.life -= 0.05 * dt;
+            const currentScale = Math.max(0, p.life * p.maxScale);
             p.mesh.scale.set(currentScale, currentScale, currentScale);
-            p.mesh.material.opacity = p.life * 0.8;
+            p.mesh.material.opacity = Math.max(0, p.life * 0.8);
             
             if (p.life <= 0) {
                 this.trailGroup.remove(p.mesh);
